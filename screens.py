@@ -49,6 +49,7 @@ class HomeScreen(Screen):
     def go_to_chats(self, instance):
         self.manager.current = 'chats'
 
+#this is the main screen
 class RegistrationScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
