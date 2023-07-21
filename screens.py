@@ -299,6 +299,21 @@ class FriendListScreen(Screen):
         # Transition to the chat room screen with the selected friend
         self.manager.current = 'chats'
         chatroom_screen = self.manager.get_screen('chats')
+        # Prepare the chat popup
+        content = BoxLayout(orientation='vertical', spacing=10)
+
+        # Text input for the chat messages
+        chat_input = TextInput(hint_text='Type your message here...', multiline=False)
+        content.add_widget(chat_input)
+
+        # Send button to send the chat message
+        send_button = Button(text='Send')
+        send_button.bind(on_press=lambda _: self.send_chat_message(username, chat_input.text))
+        content.add_widget(send_button)
+
+        # Create the chat popup
+        chat_popup = Popup(title='Chat with {}'.format(username), content=content, size_hint=(0.8, 0.4))
+        chat_popup.open()
         #chatroom_screen.set_friend(username)
 
 
