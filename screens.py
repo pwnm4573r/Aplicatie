@@ -1,4 +1,3 @@
-import json
 from kivy.uix.screenmanager import Screen
 from kivy.app import App
 from kivy.uix.screenmanager import ScreenManager
@@ -49,18 +48,6 @@ class HomeScreen(Screen):
 
     def go_to_chats(self, instance):
         self.manager.current = 'chats'
-
-    def on_leave(self):
-        # This method is called when the screen is left or the app is closed
-        # Save the current user's friend list before leaving the screen or closing the app
-        friend_list_screen = self.manager.get_screen('friend_list')
-        if friend_list_screen:
-            friend_list_screen.save_friends_to_file()
-
-    def save_friends_to_file(self):
-        # Save the current user's friend list to a JSON file
-        with open(f'{self.current_user}_list.json', 'w') as file:
-            json.dump(self.friends, file)
 
 #this is the main screen
 class RegistrationScreen(Screen):
@@ -145,6 +132,7 @@ class RegistrationScreen(Screen):
                 if user_data.exists:
                     data = user_data.to_dict()
                     if data['password_hash'] == password_hash:
+                        App.get_running_app().current_user = username
                         self.message.text = 'Login successful.'
                         self.manager.current = 'home'  # Transition to the Home screen
                     else:
@@ -161,6 +149,9 @@ class FriendListScreen(Screen):
         super().__init__(**kwargs)
         self.current_popup = None
         self.error_label = None
+
+        self.friends = {}  # Dictionary to store friends (username: public_key)
+
 
         # Main layout
         main_layout = BoxLayout(orientation='vertical')
@@ -182,13 +173,30 @@ class FriendListScreen(Screen):
         button_layout.add_widget(add_friend_button)
         main_layout.add_widget(button_layout)
 
-        self.load_friends_from_file()
-
         self.add_widget(main_layout)
+
+    def on_enter(self):
+        self.load_friends()
     
     def go_to_home(self):
         # Define the behavior of the back button here
         self.manager.current = 'home'
+
+    def load_friends(self):
+    # Get the friends from the Firestore database
+        db = firestore.client()
+        friends_ref = db.collection('friends').document(App.get_running_app().current_user).collection('user_friends')
+        friends = friends_ref.stream()
+
+        for friend in friends:
+            friend_data = friend.to_dict()
+            username = friend_data.get('username')
+            public_key = friend_data.get('public_key')
+
+            # Add the friend to the local friend list
+            self.friends[username] = public_key
+
+        self.update_friend_list()
 
 
     def show_add_friend_popup(self, instance):
@@ -212,17 +220,6 @@ class FriendListScreen(Screen):
         self.current_popup = self._popup  # Set the current_popup attribute to the new popup
         self._popup.open()
 
-            # Function to load the friend list from the JSON file when the app starts
-    def load_friends_from_file(self):
-        try:
-            with open(f'friend_list.json', 'r') as file:
-                self.friends = json.load(file)
-        except FileNotFoundError:
-            # If the file is not found (first-time use), initialize an empty dictionary
-            self.friends = {}
-        
-        self.update_friend_list()
-
     def add_friend(self, username):
         # Check if the username already exists in the friend list
         if username in self.friends:
@@ -240,8 +237,11 @@ class FriendListScreen(Screen):
             # Add the friend to the friend list
             self.friends[username] = public_key
 
-            # Save the updated friend list to a JSON file for the current user
-            self.save_friends_to_file()           
+            # Save the friend to Firestore
+            db.collection('friends').document(App.get_running_app().current_user).collection('user_friends').document(username).set({
+                'username': username,
+                'public_key': public_key
+            })
 
             # Create a container for the friend information
             friend_box = BoxLayout(orientation='horizontal', size_hint=(1, None), height=30)
@@ -265,13 +265,6 @@ class FriendListScreen(Screen):
             self.dismiss_popup()
         else:
             self.error_label.text = "User does not exist!"
-
-
-    def save_friends_to_file(self):
-        # Save the current user's friend list to a JSON file
-        with open(f'friend_list.json', 'w') as file:
-            json.dump(self.friends, file)
-
 
         #self.dismiss_popup()  # Dismiss the add friend popup
 
@@ -350,10 +343,6 @@ class FriendListScreen(Screen):
         chat_popup.open()
         #chatroom_screen.set_friend(username)
 
-    def send_chat_message(self, recipient, message):
-        # Here, you can handle sending the chat message to the recipient.
-        # You can implement the necessary logic to send the message to the recipient's chat.
-        print(f'Sending message to {recipient}: {message}')
 
 class ChatsScreen(Screen):
     def __init__(self, **kwargs):
@@ -380,6 +369,8 @@ class MyScreenManager(ScreenManager):
 
 
 class MyApp(App):
+    current_user = None
+
     def build(self):
         return MyScreenManager()
 
