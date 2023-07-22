@@ -132,6 +132,7 @@ class RegistrationScreen(Screen):
                 if user_data.exists:
                     data = user_data.to_dict()
                     if data['password_hash'] == password_hash:
+                        App.get_running_app().current_user = username
                         self.message.text = 'Login successful.'
                         self.manager.current = 'home'  # Transition to the Home screen
                     else:
@@ -150,6 +151,7 @@ class FriendListScreen(Screen):
         self.error_label = None
 
         self.friends = {}  # Dictionary to store friends (username: public_key)
+
 
         # Main layout
         main_layout = BoxLayout(orientation='vertical')
@@ -172,10 +174,29 @@ class FriendListScreen(Screen):
         main_layout.add_widget(button_layout)
 
         self.add_widget(main_layout)
+
+    def on_enter(self):
+        self.load_friends()
     
     def go_to_home(self):
         # Define the behavior of the back button here
         self.manager.current = 'home'
+
+    def load_friends(self):
+    # Get the friends from the Firestore database
+        db = firestore.client()
+        friends_ref = db.collection('friends').document(App.get_running_app().current_user).collection('user_friends')
+        friends = friends_ref.stream()
+
+        for friend in friends:
+            friend_data = friend.to_dict()
+            username = friend_data.get('username')
+            public_key = friend_data.get('public_key')
+
+            # Add the friend to the local friend list
+            self.friends[username] = public_key
+
+        self.update_friend_list()
 
 
     def show_add_friend_popup(self, instance):
@@ -215,6 +236,12 @@ class FriendListScreen(Screen):
 
             # Add the friend to the friend list
             self.friends[username] = public_key
+
+            # Save the friend to Firestore
+            db.collection('friends').document(App.get_running_app().current_user).collection('user_friends').document(username).set({
+                'username': username,
+                'public_key': public_key
+            })
 
             # Create a container for the friend information
             friend_box = BoxLayout(orientation='horizontal', size_hint=(1, None), height=30)
@@ -342,6 +369,8 @@ class MyScreenManager(ScreenManager):
 
 
 class MyApp(App):
+    current_user = None
+
     def build(self):
         return MyScreenManager()
 
