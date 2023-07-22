@@ -316,6 +316,10 @@ class FriendListScreen(Screen):
         chat_popup.open()
         #chatroom_screen.set_friend(username)
 
+    def send_chat_message(self, recipient, message):
+        # Here, you can handle sending the chat message to the recipient.
+        # You can implement the necessary logic to send the message to the recipient's chat.
+        print(f'Sending message to {recipient}: {message}')
 
 class ChatsScreen(Screen):
     def __init__(self, **kwargs):
