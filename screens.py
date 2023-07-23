@@ -1,4 +1,6 @@
 import requests
+import json
+import os
 from kivy.uix.screenmanager import Screen
 from kivy.app import App
 from kivy.uix.screenmanager import ScreenManager
@@ -51,6 +53,9 @@ class HomeScreen(Screen):
 
     def go_to_chats(self, instance):
         self.manager.current = 'chats'
+        chatroom_screen = self.manager.get_screen('chats')
+        chatroom_screen.load_firestore_chats()
+        chatroom_screen.update_chat_list()
 
 class RegistrationScreen(Screen):
     def __init__(self, **kwargs):
@@ -373,6 +378,8 @@ class ChatsScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.chats = {}  # Dictionary to store chats (username: Chat)
+        self.current_chat_id = None
+        self.load_firestore_chats()
 
         # Main layout
         layout = BoxLayout(orientation='vertical')
@@ -398,6 +405,21 @@ class ChatsScreen(Screen):
         layout.add_widget(self.chat_list_scrollview)
 
         self.add_widget(layout)
+
+    def load_firestore_chats(self):
+        # Fetch the chats from Firestore
+        db = firestore.client()
+        doc_ref = db.collection('chats').document(App.get_running_app().current_user)
+        doc = doc_ref.get()
+
+        if doc.exists:
+            # Fetch the list of chat usernames from Firestore
+            chat_usernames = doc.to_dict().get('chats', [])
+            
+            # Update the self.chats dictionary
+            for username in chat_usernames:
+                self.chats[username] = Chat(username)
+        
 
     def go_to_home(self):
         # Define the behavior of the back button here
@@ -464,6 +486,33 @@ class ChatsScreen(Screen):
             self.confirm_popup.dismiss()  # Dismiss the currently active confirmation popup
             self.confirm_popup = None  # Reset the confirm_popup attribute
 
+    def on_leave(self, instance=None):
+        if not hasattr(self, 'chat_label'):
+            # If chat_label doesn't exist, don't try to save anything
+            return
+        # Prepare the chat list
+        chat_list = []
+
+        # Split the chat label's text into lines
+        lines = self.chat_label.label.text.split('\n')
+
+        for line in lines:
+            # Split the line into username and message at the first occurrence of ":"
+            parts = line.split(':', 1)
+            if len(parts) == 2:
+                username, message = parts
+                # Add the message as a dictionary to the chat list
+                chat_list.append({username.strip(): message.strip()})
+
+        # Load all chats
+        with open('chat.json', 'r') as f:
+            chats = json.load(f)
+        # Update the chat
+        chats[self.current_chat_id] = chat_list
+        # Write the chats back to the file
+        with open('chat.json', 'w') as f:
+            json.dump(chats, f)
+
     def open_chat(self, instance, chat_username):
         # Open the chat in a popup
         content = BoxLayout(orientation='vertical', spacing=10)
@@ -481,8 +530,18 @@ class ChatsScreen(Screen):
         send_button.bind(on_press=lambda _: self.send_chat_message(chat_username, self.chat_input.text))
         content.add_widget(send_button)
 
+        # Load previous chat messages if exist
+        self.current_chat_id = f"{chat_username}"  # Construct the unique chat_id
+        with open('chat.json', 'r') as f:
+            chats = json.load(f)
+        if self.current_chat_id in chats:
+            for message_dict in chats[self.current_chat_id]:
+                for username, message in message_dict.items():
+                    self.chat_label.update_text(self.chat_label.label.text + f"{username}: {message}\n")
+
         # Create the chat popup
-        chat_popup = Popup(title=f'Chat with {chat_username}', content=content, size_hint=(0.8, 0.6))  # Adjust the size_hint_y of the Popup as well
+        chat_popup = Popup(title=f'Chat with {chat_username}', content=content, size_hint=(0.8, 0.6))
+        chat_popup.bind(on_dismiss=self.on_leave)  # Removed partial function here
         chat_popup.open()
 
     def encrypt_message(self, message, public_key):
@@ -588,16 +647,11 @@ class Chat:
 class MyScreenManager(ScreenManager):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.add_widget(RegistrationScreen(name='register'))  # Adds the registration screen to the ScreenManager
+        self.add_widget(HomeScreen(name='home'))  # Adds the home screen to the ScreenManager
+        self.add_widget(FriendListScreen(name='friend_list'))  # Use 'friend_list' as the name
+        self.add_widget(ChatsScreen(name='chats'))
+    
 
 
-class MyApp(App):
-    current_user = None
-
-    def build(self):
-        return MyScreenManager()
-
-
-if __name__ == '__main__':
-    firebase_admin.initialize_app()
-    MyApp().run()
 

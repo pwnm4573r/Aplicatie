@@ -1,17 +1,21 @@
+import os
+import json
 import firebase_init
+import firebase_admin
 from kivy.app import App
-
-from kivy.uix.screenmanager import ScreenManager
-from screens import RegistrationScreen, HomeScreen, FriendListScreen, ChatsScreen  # imports the screen classes from screens.py
+from screens import MyScreenManager  # import MyScreenManager
 
 class MyApp(App):
+    current_user = None
+
     def build(self):
-        sm = ScreenManager()
-        sm.add_widget(RegistrationScreen(name='register'))  # Adds the registration screen to the ScreenManager
-        sm.add_widget(HomeScreen(name='home'))  # Adds the home screen to the ScreenManager
-        sm.add_widget(FriendListScreen(name='friend_list'))  # Use 'friend_list' as the name
-        sm.add_widget(ChatsScreen(name='chats'))
-        return sm  # The build method must return a widget, in this case it's the ScreenManager
+        return MyScreenManager()
+
+    def on_start(self):
+        if not os.path.isfile('chat.json'):
+            with open('chat.json', 'w') as f:
+                json.dump({}, f)
 
 if __name__ == '__main__':
+    #firebase_admin.initialize_app()
     MyApp().run()  # This starts the app
