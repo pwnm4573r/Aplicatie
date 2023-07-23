@@ -1,3 +1,4 @@
+import requests
 from kivy.uix.screenmanager import Screen
 from kivy.app import App
 from kivy.uix.screenmanager import ScreenManager
@@ -12,6 +13,8 @@ import firebase_admin
 from firebase_admin import auth, firestore
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import hashes
 from functools import partial
 import hashlib
 
@@ -49,7 +52,6 @@ class HomeScreen(Screen):
     def go_to_chats(self, instance):
         self.manager.current = 'chats'
 
-#this is the main screen
 class RegistrationScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -305,6 +307,10 @@ class FriendListScreen(Screen):
 
     def delete_friend(self, instance, username):
         if username in self.friends:
+            # Delete the friend from Firestore
+            db = firestore.client()
+            db.collection('friends').document(App.get_running_app().current_user).collection('user_friends').document(username).delete()
+            
             del self.friends[username]
             self.update_friend_list()
             print(f"Friend {username} has been deleted.")
@@ -326,41 +332,257 @@ class FriendListScreen(Screen):
         # Transition to the chat room screen with the selected friend
         self.manager.current = 'chats'
         chatroom_screen = self.manager.get_screen('chats')
-        # Prepare the chat popup
-        content = BoxLayout(orientation='vertical', spacing=10)
 
-        # Text input for the chat messages
-        chat_input = TextInput(hint_text='Type your message here...', multiline=False)
-        content.add_widget(chat_input)
+        # If the chat doesn't exist, create a new one
+        if username not in chatroom_screen.chats:
+            chatroom_screen.chats[username] = Chat(username)
+        
+        chatroom_screen.update_chat_list()
 
-        # Send button to send the chat message
-        send_button = Button(text='Send')
-        send_button.bind(on_press=lambda _: self.send_chat_message(username, chat_input.text))
-        content.add_widget(send_button)
+        chatroom_screen.open_chat(instance, username)
 
-        # Create the chat popup
-        chat_popup = Popup(title='Chat with {}'.format(username), content=content, size_hint=(0.8, 0.4))
-        chat_popup.open()
-        #chatroom_screen.set_friend(username)
 
+    def send_chat_message(self, username, message):
+        # Fetch the chatroom_screen
+        chatroom_screen = self.manager.get_screen('chats')
+        
+        # Get the relevant Chat object from the chats dictionary in ChatsScreen
+        chat = chatroom_screen.chats.get(username)
+
+        if chat:
+            # Add the new message to the Chat object
+            chat.add_message(message)
+
+            # Also update the chat list in the UI
+            chatroom_screen.update_chat_list()
+            
+            # Now update the list of chats in Firestore
+            db = firestore.client()
+            
+            # First, prepare the list of chat usernames
+            chat_usernames = list(chatroom_screen.chats.keys())
+            
+            # Then, store this list in Firestore
+            db.collection('chats').document(App.get_running_app().current_user).set({
+                'chats': chat_usernames
+            })
+        else:
+            print(f"No chat with {username} found")
 
 class ChatsScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.chats = {}  # Dictionary to store chats (username: Chat)
 
+        # Main layout
         layout = BoxLayout(orientation='vertical')
-        messages_label = Label(text='Messages')
-        layout.add_widget(messages_label)
+
+        top_row = BoxLayout(orientation='horizontal', size_hint=(1, 0.1))
 
         # Back Button
         back_button = BackButton(callback=self.go_to_home, text='Back', size_hint=(None, None), size=(100, 50))
-        layout.add_widget(back_button)
+
+        chats_label = Label(text='Chats', size_hint=(0.8, 1))
+
+        # Add back button and chats label to the top row layout
+        top_row.add_widget(back_button)
+        top_row.add_widget(chats_label)
+
+        # Add the top row layout to the main layout
+        layout.add_widget(top_row)
+
+        # Chat List Layout
+        self.chat_list_layout = BoxLayout(orientation='vertical', spacing=10, size_hint=(1, None))
+        self.chat_list_scrollview = ScrollView(do_scroll_x=False, do_scroll_y=True)
+        self.chat_list_scrollview.add_widget(self.chat_list_layout)
+        layout.add_widget(self.chat_list_scrollview)
 
         self.add_widget(layout)
 
     def go_to_home(self):
         # Define the behavior of the back button here
         self.manager.current = 'home'
+
+    def update_chat_list(self):
+        # Clear the current chat list view
+        self.chat_list_layout.clear_widgets()
+
+        # Rebuild the chat list view using the chats dictionary
+        for username, chat in self.chats.items():
+            # Create a container for the chat information
+            chat_box = BoxLayout(orientation='horizontal', size_hint=(1, None), height=30)
+
+            # Add a label for the chat's username
+            chat_label = Label(text=username, size_hint=(0.6, None), height=30)
+            chat_box.add_widget(chat_label)
+
+            # Add a button to delete the chat
+            delete_button = Button(text='Delete', size_hint=(0.2, None), height=30)
+            delete_button.bind(on_press=partial(self.show_delete_confirmation, username=username))
+            chat_box.add_widget(delete_button)
+
+            # Add a button to open the chat
+            open_button = Button(text='Open', size_hint=(0.2, None), height=30)
+            open_button.bind(on_press=partial(self.open_chat, chat_username=username))
+            chat_box.add_widget(open_button)
+
+            # Add the chat container to the chat list layout
+            self.chat_list_layout.add_widget(chat_box)
+
+    def show_delete_confirmation(self, instance, username):
+        # Prepare the popup
+        content = BoxLayout(orientation='vertical', spacing=10)
+        message_label = Label(text=f"Are you sure you want to delete chat with {username}?")
+        yes_button = Button(text='Yes')
+        yes_button.bind(on_press=lambda _, u=username: self.delete_chat(_, u))
+        no_button = Button(text='No')
+        no_button.bind(on_press=lambda _: self.dismiss_confirmation_popup())
+        content.add_widget(message_label)
+        content.add_widget(yes_button)
+        content.add_widget(no_button)
+
+        self.confirm_popup = Popup(title='Confirmation', content=content, size_hint=(0.6, 0.4), auto_dismiss=False)
+        self.confirm_popup.open()
+
+    def delete_chat(self, instance, username):
+        if username in self.chats:
+            del self.chats[username]
+            self.update_chat_list()
+            self.delete_firestore_chat(username)  
+            print(f"Chat with {username} has been deleted.")
+        else:
+            print(f"Chat with {username} does not exist.")   
+        self.dismiss_confirmation_popup()
+
+    def delete_firestore_chat(self, username):
+        db = firestore.client()
+        chats_ref = db.collection('chats')
+        chats_ref.document(username).delete() 
+
+    def dismiss_confirmation_popup(self):
+        if self.confirm_popup is not None:  # Check if there is an active confirmation popup
+            self.confirm_popup.dismiss()  # Dismiss the currently active confirmation popup
+            self.confirm_popup = None  # Reset the confirm_popup attribute
+
+    def open_chat(self, instance, chat_username):
+        # Open the chat in a popup
+        content = BoxLayout(orientation='vertical', spacing=10)
+
+        # Text output for the chat messages (Scrollable Label)
+        self.chat_label = ScrollableLabel(size_hint=(1, 0.7))  # Adjust the size_hint_y to give more space for chat output
+        content.add_widget(self.chat_label)
+
+        # Text input for the chat messages
+        self.chat_input = TextInput(hint_text='Type your message here...', multiline=False, size_hint=(1, 0.1))
+        content.add_widget(self.chat_input)
+
+        # Send button to send the chat message
+        send_button = Button(text='Send', size_hint=(1, 0.1))
+        send_button.bind(on_press=lambda _: self.send_chat_message(chat_username, self.chat_input.text))
+        content.add_widget(send_button)
+
+        # Create the chat popup
+        chat_popup = Popup(title=f'Chat with {chat_username}', content=content, size_hint=(0.8, 0.6))  # Adjust the size_hint_y of the Popup as well
+        chat_popup.open()
+
+    def encrypt_message(self, message, public_key):
+        # Load public key
+        pem = public_key.encode('ascii')
+        public_key = serialization.load_pem_public_key(pem)
+
+        # Encrypt the message
+        encrypted = public_key.encrypt(
+            message.encode('utf-8'),
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+
+        return encrypted
+
+    def get_public_key(self, username):
+        db = firestore.client()
+        doc_ref = db.collection('friends').document(App.get_running_app().current_user).collection('user_friends').document(username)
+        doc = doc_ref.get()
+
+        if doc.exists:
+            return doc.to_dict().get('public_key')
+        else:
+            print(f'No public key found for user: {username}')
+            return None
+
+    def send_chat_message(self, username, message):
+        # Fetch the relevant Chat object from the chats dictionary
+        chat = self.chats.get(username)
+
+        if chat:
+            public_key = self.get_public_key(username)
+            if public_key:
+                encrypted_message = self.encrypt_message(message, public_key)
+                # Add the new encrypted message to the Chat object
+                chat.add_message(encrypted_message)
+
+                # Display the unencrypted message in the output chat box
+                self.chat_label.update_text(self.chat_label.label.text + f"{App.get_running_app().current_user}: {message}\n")
+
+                # Also update the chat list in the UI
+                self.update_chat_list()
+
+                # Send the encrypted message to the middleware server
+                self.send_http_request(username, encrypted_message)
+                
+                # Clear the input box
+                self.chat_input.text = ''
+
+                # You could add here the code to update the list of chats in Firestore, 
+                # or handle other events when a new message is sent
+            else:
+                print(f"Can't send message, no public key for {username}")
+        else:
+            print(f"No chat with {username} found")
+
+    def send_http_request(self, username, encrypted_message):
+        # The URL of your middleware server
+        url = 'https://middleware-server4-r4ajsmn3fa-ez.a.run.app/send_message'
+
+        # The data to send with the HTTP request
+        # The encrypted message is converted to a hexadecimal string for transmission
+        data = {
+            'recipient': username,
+            'message': encrypted_message.hex()
+        }
+
+        # Send the HTTP request
+        response = requests.post(url, json=data)
+
+        # Check the HTTP response
+        if response.status_code == 200:
+            print('Message sent successfully')
+        else:
+            print('Failed to send message, status code:', response.status_code)
+
+class ScrollableLabel(ScrollView):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.label = Label(size_hint=(1, None), padding=(0, 50, 0, 0), text_size=(self.width, None))  
+        self.add_widget(self.label)
+
+    def on_size(self, *args):
+        self.label.text_size = (self.width, None)
+        self.label.height = self.label.texture_size[1]
+
+    def update_text(self, new_text):
+        self.label.text = new_text
+
+class Chat:
+    def __init__(self, username):
+        self.username = username
+        self.messages = []
+
+    def add_message(self, message):
+        self.messages.append(message)
 
 
 class MyScreenManager(ScreenManager):
