@@ -119,6 +119,7 @@ class RegistrationScreen(Screen):
 
                 self.message.text = 'User registration successful.'
                 self.manager.current = 'home'  # Transition to the Home screen
+                App.get_running_app().current_user = username
             except Exception as e:
                 self.message.text = str(e)
 
@@ -571,7 +572,7 @@ class ChatsScreen(Screen):
 
     def get_public_key(self, username):
         db = firestore.client()
-        doc_ref = db.collection('friends').document(App.get_running_app().current_user).collection('user_friends').document(username)
+        doc_ref = db.collection('users').document(username)
         doc = doc_ref.get()
 
         if doc.exists:
