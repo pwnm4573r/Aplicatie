@@ -512,6 +512,14 @@ class ChatsScreen(Screen):
         # Write the chats back to the file
         with open('chat.json', 'w') as f:
             json.dump(chats, f)
+        
+        #store info in firestore on chat exit
+        db = firestore.client()
+        chat_usernames = list(self.chats.keys())
+        db.collection('chats').document(App.get_running_app().current_user).set({
+            'chats': chat_usernames
+        })
+
 
     def open_chat(self, instance, chat_username):
         # Open the chat in a popup
