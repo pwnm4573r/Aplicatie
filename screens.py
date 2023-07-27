@@ -1,6 +1,7 @@
 import requests
 import json
 import os
+from kivy.clock import Clock
 from kivy.uix.screenmanager import Screen
 from kivy.app import App
 from kivy.uix.screenmanager import ScreenManager
@@ -420,6 +421,28 @@ class ChatsScreen(Screen):
             # Update the self.chats dictionary
             for username in chat_usernames:
                 self.chats[username] = Chat(username)
+
+    def fetch_latest_messages(self, dt):
+        for username, chat in self.chats.items():
+            try:
+                url = f'https://server-middleware-r4ajsmn3fa-ez.a.run.app/get_message/{username}'
+                response = requests.get(url)
+                if response.status_code != 200:
+                    print(f'Error fetching messages for {username}: {response.status_code}')
+                    continue
+
+                messages = response.json()
+                # Add the new messages to the Chat object
+                # Skip if there are no new messages
+                if messages:
+                    for message in messages:
+                        chat.add_message(message['message'])
+
+                    # Update the UI with the new messages
+                    self.update_chat_list()
+
+            except Exception as e:
+                print(f'Error fetching messages for {username}: {e}')
         
 
     def go_to_home(self):
@@ -613,7 +636,7 @@ class ChatsScreen(Screen):
 
     def send_http_request(self, username, encrypted_message):
         # The URL of your middleware server
-        url = 'https://middleware-server4-r4ajsmn3fa-ez.a.run.app/send_message'
+        url = 'https://server-middleware-r4ajsmn3fa-ez.a.run.app/send_message'
 
         # The data to send with the HTTP request
         # The encrypted message is converted to a hexadecimal string for transmission
