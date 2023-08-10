@@ -15,9 +15,10 @@ from kivy.uix.actionbar import ActionBar, ActionView, ActionPrevious
 import firebase_admin
 from firebase_admin import auth, firestore
 from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import serialization, asymmetric
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
 from functools import partial
 import hashlib
 
@@ -422,6 +423,26 @@ class ChatsScreen(Screen):
             for username in chat_usernames:
                 self.chats[username] = Chat(username)
 
+    def decrypt_with_private_key(self, ciphertext):
+        # Load the private key from the file
+        with open('private_key.pem', 'rb') as key_file:
+            private_key = serialization.load_pem_private_key(
+                key_file.read(),
+                password=None,
+                backend=default_backend()
+            )
+
+        # Decrypt the message using the private key
+        plaintext = private_key.decrypt(
+            ciphertext,
+            asymmetric.padding.OAEP(
+                mgf=asymmetric.padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+        return plaintext
+
     def fetch_latest_messages(self, dt):
         for username, chat in self.chats.items():
             try:
@@ -435,11 +456,22 @@ class ChatsScreen(Screen):
                 # Add the new messages to the Chat object
                 # Skip if there are no new messages
                 if messages:
-                    for message in messages:
-                        chat.add_message(message['message'])
+                    for message_data in messages:
+                        # Extracting the encrypted message in hex format from nested dictionary
+                        encrypted_message_hex = message_data['message']['message']
+                        
+                        # Convert the hex string to bytes
+                        encrypted_message_bytes = bytes.fromhex(encrypted_message_hex)
+                        
+                        # Decrypt the message using the private key
+                        decrypted_message = self.decrypt_with_private_key(encrypted_message_bytes)
+
+                        # Add the decrypted message to the chat (assuming the decrypted message is a string)
+                        chat.add_message(decrypted_message.decode())
 
                     # Update the UI with the new messages
                     self.update_chat_list()
+                    print(decrypted_message.decode())
 
             except Exception as e:
                 print(f'Error fetching messages for {username}: {e}')
