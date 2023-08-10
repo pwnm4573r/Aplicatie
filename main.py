@@ -18,7 +18,7 @@ class MyApp(App):
             with open('chat.json', 'w') as f:
                 json.dump({}, f)
         chats_screen = self.screen_manager.get_screen('chats')
-        Clock.schedule_interval(chats_screen.fetch_latest_messages(), 5)
+        Clock.schedule_interval(chats_screen.fetch_latest_messages, 5)
 
     def on_stop(self):
         # Delete the chat.json file

@@ -638,10 +638,13 @@ class ChatsScreen(Screen):
         # The URL of your middleware server
         url = 'https://server-middleware-r4ajsmn3fa-ez.a.run.app/send_message'
 
+        # Get the current user's username
+        sender_username = App.get_running_app().current_user
+
         # The data to send with the HTTP request
-        # The encrypted message is converted to a hexadecimal string for transmission
         data = {
             'recipient': username,
+            'sender': sender_username,
             'message': encrypted_message.hex()
         }
 
