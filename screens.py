@@ -48,6 +48,11 @@ class HomeScreen(Screen):
         messages_button.bind(on_press=self.go_to_chats)
         layout.add_widget(messages_button)
 
+        # Sign Out Button
+        signout_button = Button(text='Sign Out', size_hint=(1, 0.3))
+        signout_button.bind(on_press=self.sign_out)
+        layout.add_widget(signout_button)
+
         self.add_widget(layout)
 
     def go_to_friend_list(self, instance):
@@ -58,6 +63,41 @@ class HomeScreen(Screen):
         chatroom_screen = self.manager.get_screen('chats')
         chatroom_screen.load_firestore_chats()
         chatroom_screen.update_chat_list()
+
+    def sign_out(self, instance):
+        def confirmed(instance):
+            """Action to perform after the user confirms signing out."""
+            App.get_running_app().current_user = None
+            # Delete private key
+            if os.path.isfile('private_key.pem'):
+                os.remove('private_key.pem')
+            # Transition to the Registration screen
+            self.manager.current = 'register'
+            popup.dismiss()  # Close the popup
+
+        def cancel(instance):
+            """Action to perform if the user cancels signing out."""
+            popup.dismiss()  # Close the popup
+
+        content = BoxLayout(orientation='vertical', spacing=10, padding=10)
+        message = Label(
+            text="!!!Warning!!!\nSigning out will delete your private key. \n*ANY MESSAGES RECEIVED WHILE SIGNED OUT WILL BE INACCESSIBLE!*\n Are you sure you want to sign out?",
+            size_hint_y=None,
+            valign='top',
+            halign='center',
+            font_size='16sp',  # Reduce font size to fit the text
+            color = (1, 0, 0, 1)
+        )
+        message.bind(texture_size=message.setter('size'))
+        yes_button = Button(text="Yes", on_press=confirmed)
+        no_button = Button(text="No", on_press=cancel)
+
+        content.add_widget(message)
+        content.add_widget(yes_button)
+        content.add_widget(no_button)
+
+        popup = Popup(title='Confirm Sign Out', content=content, size_hint=(0.9, 0.5))
+        popup.open()
 
 class RegistrationScreen(Screen):
     def __init__(self, **kwargs):
@@ -115,7 +155,7 @@ class RegistrationScreen(Screen):
                     encoding=serialization.Encoding.PEM,
                     format=serialization.PrivateFormat.PKCS8,
                     encryption_algorithm=serialization.NoEncryption()
-                )
+                ) + "\n".encode() + username.encode()
                 with open('private_key.pem', 'wb') as f:
                     f.write(private_key_pem)
 
@@ -142,6 +182,28 @@ class RegistrationScreen(Screen):
                 if user_data.exists:
                     data = user_data.to_dict()
                     if data['password_hash'] == password_hash:
+                            # 1. Generate a new key pair
+                        key = rsa.generate_private_key(
+                            public_exponent=65537,
+                            key_size=2048,
+                        )
+
+                            # 2. Store private key locally
+                        private_key_pem = key.private_bytes(
+                            encoding=serialization.Encoding.PEM,
+                            format=serialization.PrivateFormat.PKCS8,
+                            encryption_algorithm=serialization.NoEncryption()
+                        ) + "\n".encode() + username.encode()  # Appending the username
+                        with open('private_key.pem', 'wb') as f:
+                            f.write(private_key_pem)
+
+                            # 3. Update the public key in Firestore
+                        public_key_pem = key.public_key().public_bytes(
+                            encoding=serialization.Encoding.PEM,
+                            format=serialization.PublicFormat.SubjectPublicKeyInfo
+                        )
+                        user_ref.update({'public_key': public_key_pem.decode()})
+
                         App.get_running_app().current_user = username
                         self.message.text = 'Login successful.'
                         self.manager.current = 'home'  # Transition to the Home screen
@@ -689,6 +751,53 @@ class ChatsScreen(Screen):
         else:
             print('Failed to send message, status code:', response.status_code)
 
+class PasswordScreen(Screen):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        self.layout = BoxLayout(orientation='vertical')
+
+        self.password_input = TextInput(hint_text='Password', multiline=False, password=True)
+        self.login_button = Button(text='Log In', on_press=self.verify_password) 
+        self.message = Label()  
+
+        self.layout.add_widget(self.password_input)
+        self.layout.add_widget(self.login_button)
+        self.layout.add_widget(self.message)
+
+        self.add_widget(self.layout)
+
+    def verify_password(self, instance):
+        password = self.password_input.text
+        if password:
+            # Calculate the password hash
+            password_hash = hashlib.sha256(password.encode()).hexdigest()
+
+            try:
+                # Fetch user data from Firestore based on the username stored in private_key.pem
+                with open('private_key.pem', 'rb') as f:
+                    data = f.read()
+                    username = data.decode().split('-----END PRIVATE KEY-----')[1].strip()
+                
+                db = firestore.client()
+                user_ref = db.collection('users').document(username)
+                user_data = user_ref.get()
+
+                if user_data.exists:
+                    data = user_data.to_dict()
+                    if data['password_hash'] == password_hash:
+                        App.get_running_app().current_user = username
+                        self.message.text = 'Login successful.'
+                        self.manager.current = 'home'
+                    else:
+                        self.message.text = 'Invalid password.'
+                else:
+                    self.message.text = 'User does not exist.'
+            except Exception as e:
+                self.message.text = str(e)
+        else:
+            self.message.text = 'Please enter your password.'
+
 class ScrollableLabel(ScrollView):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -715,6 +824,7 @@ class MyScreenManager(ScreenManager):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.add_widget(RegistrationScreen(name='register'))  # Adds the registration screen to the ScreenManager
+        self.add_widget(PasswordScreen(name='password'))
         self.add_widget(HomeScreen(name='home'))  # Adds the home screen to the ScreenManager
         self.add_widget(FriendListScreen(name='friend_list'))  # Use 'friend_list' as the name
         self.add_widget(ChatsScreen(name='chats'))
