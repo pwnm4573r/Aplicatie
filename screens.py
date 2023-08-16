@@ -519,25 +519,39 @@ class ChatsScreen(Screen):
                 # Skip if there are no new messages
                 if messages:
                     for message_data in messages:
-                        # Extracting the encrypted message in hex format from nested dictionary
-                        encrypted_message_hex = message_data['message']['message']
-                        
-                        # Convert the hex string to bytes
-                        encrypted_message_bytes = bytes.fromhex(encrypted_message_hex)
-                        
-                        # Decrypt the message using the private key
-                        decrypted_message = self.decrypt_with_private_key(encrypted_message_bytes)
+                        try:
+                            # Extracting the encrypted message in hex format from nested dictionary
+                            encrypted_message_hex = message_data['message']['message']
+                            
+                            # Convert the hex string to bytes
+                            encrypted_message_bytes = bytes.fromhex(encrypted_message_hex)
+                            
+                            # Decrypt the message using the private key
+                            decrypted_message = self.decrypt_with_private_key(encrypted_message_bytes)
 
-                        # Add the decrypted message to the chat (assuming the decrypted message is a string)
-                        chat.add_message(decrypted_message.decode())
+                            # Add the decrypted message to the chat (assuming the decrypted message is a string)
+                            chat.add_message(decrypted_message.decode())
 
-                    # Update the UI with the new messages
-                    self.update_chat_list()
-                    print(decrypted_message.decode())
+                            self.store_to_chat_json(username, decrypted_message.decode())
+
+                            # Update the UI with the new messages
+                            self.update_chat_list()
+                            print(decrypted_message.decode())
+                        except Exception as inner_e:
+                            print(f"Error decrypting message from {username}: {inner_e}")
 
             except Exception as e:
                 print(f'Error fetching messages for {username}: {e}')
-        
+    
+    def store_to_chat_json(self, username, message):
+        with open('chat.json', 'r') as f:
+            chats = json.load(f)
+        current_chat_id = f"{username}"
+        if current_chat_id not in chats:
+            chats[current_chat_id] = []
+        chats[current_chat_id].append({App.get_running_app().current_user: message})
+        with open('chat.json', 'w') as f:
+            json.dump(chats, f)
 
     def go_to_home(self):
         # Define the behavior of the back button here
