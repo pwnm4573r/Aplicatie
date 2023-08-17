@@ -71,6 +71,8 @@ class HomeScreen(Screen):
             # Delete private key
             if os.path.isfile('private_key.pem'):
                 os.remove('private_key.pem')
+            if os.path.isfile('user.json'):
+                os.remove('user.json')
             # Transition to the Registration screen
             self.manager.current = 'register'
             popup.dismiss()  # Close the popup
@@ -155,11 +157,12 @@ class RegistrationScreen(Screen):
                     encoding=serialization.Encoding.PEM,
                     format=serialization.PrivateFormat.PKCS8,
                     encryption_algorithm=serialization.NoEncryption()
-                ) + "\n".encode() + username.encode()
+                )
                 with open('private_key.pem', 'wb') as f:
                     f.write(private_key_pem)
 
                 self.message.text = 'User registration successful.'
+                self.write_username_to_file(username)
                 self.manager.current = 'home'  # Transition to the Home screen
                 App.get_running_app().current_user = username
             except Exception as e:
@@ -193,7 +196,7 @@ class RegistrationScreen(Screen):
                             encoding=serialization.Encoding.PEM,
                             format=serialization.PrivateFormat.PKCS8,
                             encryption_algorithm=serialization.NoEncryption()
-                        ) + "\n".encode() + username.encode()  # Appending the username
+                        ) 
                         with open('private_key.pem', 'wb') as f:
                             f.write(private_key_pem)
 
@@ -206,6 +209,7 @@ class RegistrationScreen(Screen):
 
                         App.get_running_app().current_user = username
                         self.message.text = 'Login successful.'
+                        self.write_username_to_file(username)
                         self.manager.current = 'home'  # Transition to the Home screen
                     else:
                         self.message.text = 'Invalid password.'
@@ -215,6 +219,10 @@ class RegistrationScreen(Screen):
                 self.message.text = str(e)
         else:
             self.message.text = 'Please enter a username and password.'
+
+    def write_username_to_file(username):
+        with open('user.json', 'w') as f:
+            json.dump({"username": username}, f)
 
 class FriendListScreen(Screen):
     def __init__(self, **kwargs):
@@ -788,10 +796,10 @@ class PasswordScreen(Screen):
             password_hash = hashlib.sha256(password.encode()).hexdigest()
 
             try:
-                # Fetch user data from Firestore based on the username stored in private_key.pem
-                with open('private_key.pem', 'rb') as f:
-                    data = f.read()
-                    username = data.decode().split('-----END PRIVATE KEY-----')[1].strip()
+                # Fetch user data from Firestore based on the username stored in user.json
+                with open('user.json', 'r') as f:
+                    data = json.load(f)
+                    username = data['username']
                 
                 db = firestore.client()
                 user_ref = db.collection('users').document(username)

@@ -19,7 +19,10 @@ class MyApp(App):
             self.screen_manager.current = 'register'  # If private_key.pem does not exist, this takes the user to the regitration screen. 
         else:
             self.screen_manager.current = 'password' # If there is a private_key.pem file, the user is taken to the password screen.
-            
+
+        if not os.path.isfile('user.json'):
+            with open('user.json', 'w') as f:
+                json.dump({}, f)
 
         if not os.path.isfile('chat.json'):
             with open('chat.json', 'w') as f:
