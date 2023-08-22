@@ -220,7 +220,7 @@ class RegistrationScreen(Screen):
         else:
             self.message.text = 'Please enter a username and password.'
 
-    def write_username_to_file(username):
+    def write_username_to_file(self, username):
         with open('user.json', 'w') as f:
             json.dump({"username": username}, f)
 
@@ -538,7 +538,7 @@ class ChatsScreen(Screen):
                             decrypted_message = self.decrypt_with_private_key(encrypted_message_bytes)
 
                             # Add the decrypted message to the chat (assuming the decrypted message is a string)
-                            chat.add_message(decrypted_message.decode())
+                            Chat.add_message(decrypted_message.decode())
 
                             self.store_to_chat_json(username, decrypted_message.decode())
 
