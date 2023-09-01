@@ -514,52 +514,83 @@ class ChatsScreen(Screen):
         return plaintext
 
     def fetch_latest_messages(self, dt):
-        for username, chat in self.chats.items():
-            try:
-                url = f'https://server-middleware-r4ajsmn3fa-ez.a.run.app/get_message/{username}'
-                response = requests.get(url)
-                if response.status_code != 200:
-                    print(f'Error fetching messages for {username}: {response.status_code}')
-                    continue
+        # Fetch only the current user's messages.
+        username = App.get_running_app().current_user  # Assuming there's a method/attribute with the current user's username
+        
+        try:
+            url = f'https://server-middleware-r4ajsmn3fa-ez.a.run.app/get_message/{username}'
+            response = requests.get(url)
+            if response.status_code != 200:
+                print(f'Error fetching messages for {username}: {response.status_code}')
+                return
 
-                messages = response.json()
-                # Add the new messages to the Chat object
-                # Skip if there are no new messages
-                if messages:
-                    for message_data in messages:
-                        try:
-                            # Extracting the encrypted message in hex format from nested dictionary
-                            encrypted_message_hex = message_data['message']['message']
-                            
-                            # Convert the hex string to bytes
-                            encrypted_message_bytes = bytes.fromhex(encrypted_message_hex)
-                            
-                            # Decrypt the message using the private key
-                            decrypted_message = self.decrypt_with_private_key(encrypted_message_bytes)
+            messages = response.json()
+            
+            # Skip if there are no new messages
+            if messages:
+                for message_data in messages:
+                    try:
+                        print(f"Sample message structure for {username}: {message_data}")  # Log the message data
+                        
+                        # Extracting the sender and encrypted message
+                        sender = message_data.get('message', {}).get('sender', 'unknown')
+                        encrypted_message_hex = message_data.get('message', {}).get('message', None)
 
-                            # Add the decrypted message to the chat (assuming the decrypted message is a string)
-                            Chat.add_message(decrypted_message.decode())
+                        if not encrypted_message_hex:
+                            print(f"Message data is missing expected keys: {message_data}")
+                            continue
 
-                            self.store_to_chat_json(username, decrypted_message.decode())
+                        # Convert the hex string to bytes
+                        encrypted_message_bytes = bytes.fromhex(encrypted_message_hex)
+                        
+                        # Decrypt the message using the private key
+                        decrypted_message = self.decrypt_with_private_key(encrypted_message_bytes)
 
-                            # Update the UI with the new messages
-                            self.update_chat_list()
-                            print(decrypted_message.decode())
-                        except Exception as inner_e:
-                            print(f"Error decrypting message from {username}: {inner_e}")
+                        # Get the chat object for the sender
+                        chat = self.chats.get(sender, None)
+                        if not chat:
+                            print(f"No chat object found for sender: {sender}. Available chats: {list(self.chats.keys())}")
+                            continue  # continue to the next iteration
+                        
+                        chat.add_message(decrypted_message.decode())
 
-            except Exception as e:
-                print(f'Error fetching messages for {username}: {e}')
-    
-    def store_to_chat_json(self, username, message):
+                        # Store the message to chat.json
+                        self.store_to_chat_json(sender, decrypted_message.decode())
+                        self.delete_message_from_firestore(username, message_data['id'])
+
+                        # Update the UI with the new messages
+                        self.update_chat_list()
+                        print(decrypted_message.decode())
+                    except Exception as inner_e:
+                        print(f"Error decrypting message from {sender}: {inner_e}")
+
+        except Exception as e:
+            print(f'Error fetching messages for {username}: {e}')
+
+
+    def store_to_chat_json(self, sender, message):
         with open('chat.json', 'r') as f:
             chats = json.load(f)
-        current_chat_id = f"{username}"
-        if current_chat_id not in chats:
-            chats[current_chat_id] = []
-        chats[current_chat_id].append({App.get_running_app().current_user: message})
+
+        current_user = App.get_running_app().current_user  # The receiver's username
+
+        if sender not in chats:
+            chats[sender] = []
+
+        formatted_message = {sender: message}
+        chats[sender].append(formatted_message)
+
         with open('chat.json', 'w') as f:
             json.dump(chats, f)
+
+    def delete_message_from_firestore(self, user_id, message_id):
+        db = firestore.client()
+        
+        # Reference the user's messages collection
+        user_messages_ref = db.collection('users').document(user_id).collection('messages')
+        
+        # Delete the specific message
+        user_messages_ref.document(message_id).delete()
 
     def go_to_home(self):
         # Define the behavior of the back button here
@@ -666,7 +697,7 @@ class ChatsScreen(Screen):
         content = BoxLayout(orientation='vertical', spacing=10)
 
         # Text output for the chat messages (Scrollable Label)
-        self.chat_label = ScrollableLabel(size_hint=(1, 0.7))  # Adjust the size_hint_y to give more space for chat output
+        self.chat_label = ScrollableLabel(size_hint=(1, 0.7))
         content.add_widget(self.chat_label)
 
         # Text input for the chat messages
@@ -678,8 +709,8 @@ class ChatsScreen(Screen):
         send_button.bind(on_press=lambda _: self.send_chat_message(chat_username, self.chat_input.text))
         content.add_widget(send_button)
 
-        # Load previous chat messages if exist
-        self.current_chat_id = f"{chat_username}"  # Construct the unique chat_id
+        # Load previous chat messages if they exist
+        self.current_chat_id = f"{chat_username}"
         with open('chat.json', 'r') as f:
             chats = json.load(f)
         if self.current_chat_id in chats:
@@ -689,7 +720,7 @@ class ChatsScreen(Screen):
 
         # Create the chat popup
         chat_popup = Popup(title=f'Chat with {chat_username}', content=content, size_hint=(0.8, 0.6))
-        chat_popup.bind(on_dismiss=self.on_leave)  # Removed partial function here
+        chat_popup.bind(on_dismiss=self.on_leave)
         chat_popup.open()
 
     def encrypt_message(self, message, public_key):
