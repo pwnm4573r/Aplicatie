@@ -774,8 +774,6 @@ class ChatsScreen(Screen):
                 # Clear the input box
                 self.chat_input.text = ''
 
-                # You could add here the code to update the list of chats in Firestore, 
-                # or handle other events when a new message is sent
             else:
                 print(f"Can't send message, no public key for {username}")
         else:
