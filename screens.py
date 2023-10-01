@@ -12,8 +12,7 @@ from kivy.uix.popup import Popup
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.actionbar import ActionBar, ActionView, ActionPrevious
-import firebase_admin
-from firebase_admin import auth, firestore
+import db
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization, asymmetric
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -61,7 +60,7 @@ class HomeScreen(Screen):
     def go_to_chats(self, instance):
         self.manager.current = 'chats'
         chatroom_screen = self.manager.get_screen('chats')
-        chatroom_screen.load_firestore_chats()
+        chatroom_screen.load_mysql_chats()
         chatroom_screen.update_chat_list()
 
     def sign_out(self, instance):
@@ -148,9 +147,12 @@ class RegistrationScreen(Screen):
             }
 
             try:
-                # Store user data in Firestore
-                db = firestore.client()
-                db.collection('users').document(username).set(data)
+                # Insert user data into MySQL
+                sql = """
+                    INSERT INTO Users (username, password_hash, public_key)
+                    VALUES (%s, %s, %s)
+                """
+                db.query(sql, (username, password_hash, public_key_pem.decode()))
 
                 # Save private key locally
                 private_key_pem = key.private_bytes(
@@ -177,13 +179,12 @@ class RegistrationScreen(Screen):
             password_hash = hashlib.sha256(password.encode()).hexdigest()
 
             try:
-                # Fetch user data from Firestore
-                db = firestore.client()
-                user_ref = db.collection('users').document(username)
-                user_data = user_ref.get()
+                # Fetch user data from MySQL
+                sql = "SELECT password_hash, public_key FROM Users WHERE username = %s"
+                user_data = db.query(sql, (username,))
 
-                if user_data.exists:
-                    data = user_data.to_dict()
+                if user_data:
+                    data = user_data[0]
                     if data['password_hash'] == password_hash:
                             # 1. Generate a new key pair
                         key = rsa.generate_private_key(
@@ -205,7 +206,8 @@ class RegistrationScreen(Screen):
                             encoding=serialization.Encoding.PEM,
                             format=serialization.PublicFormat.SubjectPublicKeyInfo
                         )
-                        user_ref.update({'public_key': public_key_pem.decode()})
+                        sql_update = "UPDATE Users SET public_key = %s WHERE username = %s"
+                        db.query(sql_update, (public_key_pem.decode(), username))
 
                         App.get_running_app().current_user = username
                         self.message.text = 'Login successful.'
@@ -263,16 +265,12 @@ class FriendListScreen(Screen):
         self.manager.current = 'home'
 
     def load_friends(self):
-    # Get the friends from the Firestore database
-        db = firestore.client()
-        friends_ref = db.collection('friends').document(App.get_running_app().current_user).collection('user_friends')
-        friends = friends_ref.stream()
+        # Get the friends from the MySQL database
+        sql = "SELECT friend_username, friend_public_key FROM Friends WHERE username = %s"
+        friends = db.query(sql, (App.get_running_app().current_user,))
 
         for friend in friends:
-            friend_data = friend.to_dict()
-            username = friend_data.get('username')
-            public_key = friend_data.get('public_key')
-
+            username, public_key = friend
             # Add the friend to the local friend list
             self.friends[username] = public_key
 
@@ -306,22 +304,22 @@ class FriendListScreen(Screen):
             self.error_label.text = "Friend already exists!"
             return
 
-        # Get the public key from the Firestore database
-        db = firestore.client()
-        user_ref = db.collection('users').document(username)
-        user_data = user_ref.get().to_dict()
+        # Get the public key from the MySQL database
+        sql = "SELECT public_key FROM Users WHERE username = %s"
+        user_data = db.query(sql, (username,))
 
         if user_data:
-            public_key = user_data.get('public_key')
+            public_key = user_data[0][0]
 
             # Add the friend to the friend list
             self.friends[username] = public_key
 
-            # Save the friend to Firestore
-            db.collection('friends').document(App.get_running_app().current_user).collection('user_friends').document(username).set({
-                'username': username,
-                'public_key': public_key
-            })
+            # Save the friend to MySQL
+            sql_insert = """
+                INSERT INTO Friends (username, friend_username, friend_public_key)
+                VALUES (%s, %s, %s)
+            """
+            db.query(sql_insert, (App.get_running_app().current_user, username, public_key))
 
             # Create a container for the friend information
             friend_box = BoxLayout(orientation='horizontal', size_hint=(1, None), height=30)
@@ -385,15 +383,15 @@ class FriendListScreen(Screen):
 
     def delete_friend(self, instance, username):
         if username in self.friends:
-            # Delete the friend from Firestore
-            db = firestore.client()
-            db.collection('friends').document(App.get_running_app().current_user).collection('user_friends').document(username).delete()
+            # Delete the friend from MySQL
+            sql = "DELETE FROM Friends WHERE username = %s AND friend_username = %s"
+            db.query(sql, (App.get_running_app().current_user, username))
             
             del self.friends[username]
             self.update_friend_list()
             print(f"Friend {username} has been deleted.")
         else:
-            print(f"Friend {username} does not exist.")   
+            print(f"Friend {username} does not exist.")
         self.dismiss_confirmation_popup()
 
     def dismiss_popup(self):
@@ -434,16 +432,9 @@ class FriendListScreen(Screen):
             # Also update the chat list in the UI
             chatroom_screen.update_chat_list()
             
-            # Now update the list of chats in Firestore
-            db = firestore.client()
-            
-            # First, prepare the list of chat usernames
-            chat_usernames = list(chatroom_screen.chats.keys())
-            
-            # Then, store this list in Firestore
-            db.collection('chats').document(App.get_running_app().current_user).set({
-                'chats': chat_usernames
-            })
+            # Now update the list of chats in MySQL
+            sql = "INSERT INTO Chats (username, chat_partner) VALUES (%s, %s)"
+            db.query(sql, (App.get_running_app().current_user, username))
         else:
             print(f"No chat with {username} found")
 
@@ -452,7 +443,7 @@ class ChatsScreen(Screen):
         super().__init__(**kwargs)
         self.chats = {}  # Dictionary to store chats (username: Chat)
         self.current_chat_id = None
-        self.load_firestore_chats()
+        self.load_mysql_chats()
 
         # Main layout
         layout = BoxLayout(orientation='vertical')
@@ -479,19 +470,13 @@ class ChatsScreen(Screen):
 
         self.add_widget(layout)
 
-    def load_firestore_chats(self):
-        # Fetch the chats from Firestore
-        db = firestore.client()
-        doc_ref = db.collection('chats').document(App.get_running_app().current_user)
-        doc = doc_ref.get()
+    def load_mysql_chats(self):
+        sql = "SELECT chat_partner FROM Chats WHERE username = %s"
+        results = db.query(sql, (App.get_running_app().current_user,))
 
-        if doc.exists:
-            # Fetch the list of chat usernames from Firestore
-            chat_usernames = doc.to_dict().get('chats', [])
-            
-            # Update the self.chats dictionary
-            for username in chat_usernames:
-                self.chats[username] = Chat(username)
+        for result in results:
+            username = result[0]
+            self.chats[username] = Chat(username)
 
     def decrypt_with_private_key(self, ciphertext):
         # Load the private key from the file
@@ -556,7 +541,7 @@ class ChatsScreen(Screen):
 
                         # Store the message to chat.json
                         self.store_to_chat_json(sender, decrypted_message.decode())
-                        self.delete_message_from_firestore(username, message_data['id'])
+                        self.delete_message_from_mysql(username, message_data['id'])
 
                         # Update the UI with the new messages
                         self.update_chat_list()
@@ -583,14 +568,9 @@ class ChatsScreen(Screen):
         with open('chat.json', 'w') as f:
             json.dump(chats, f)
 
-    def delete_message_from_firestore(self, user_id, message_id):
-        db = firestore.client()
-        
-        # Reference the user's messages collection
-        user_messages_ref = db.collection('users').document(user_id).collection('messages')
-        
-        # Delete the specific message
-        user_messages_ref.document(message_id).delete()
+    def delete_message_from_mysql(self, user_id, message_id):
+        sql = "DELETE FROM Messages WHERE username = %s AND message_id = %s"
+        db.query(sql, (user_id, message_id))
 
     def go_to_home(self):
         # Define the behavior of the back button here
@@ -641,16 +621,15 @@ class ChatsScreen(Screen):
         if username in self.chats:
             del self.chats[username]
             self.update_chat_list()
-            self.delete_firestore_chat(username)  
+            self.delete_mysql_chat(username)  
             print(f"Chat with {username} has been deleted.")
         else:
             print(f"Chat with {username} does not exist.")   
         self.dismiss_confirmation_popup()
 
-    def delete_firestore_chat(self, username):
-        db = firestore.client()
-        chats_ref = db.collection('chats')
-        chats_ref.document(username).delete() 
+    def delete_mysql_chat(self, username):
+        sql = "DELETE FROM Chats WHERE username = %s AND chat_partner = %s"
+        db.query(sql, (App.get_running_app().current_user, username)) 
 
     def dismiss_confirmation_popup(self):
         if self.confirm_popup is not None:  # Check if there is an active confirmation popup
@@ -684,12 +663,9 @@ class ChatsScreen(Screen):
         with open('chat.json', 'w') as f:
             json.dump(chats, f)
         
-        #store info in firestore on chat exit
-        db = firestore.client()
-        chat_usernames = list(self.chats.keys())
-        db.collection('chats').document(App.get_running_app().current_user).set({
-            'chats': chat_usernames
-        })
+        # Store info in MySQL on chat exit
+        sql = "UPDATE Chats SET chats = %s WHERE username = %s"
+        db.query(sql, (json.dumps(chat_list), App.get_running_app().current_user))
 
 
     def open_chat(self, instance, chat_username):
@@ -741,12 +717,10 @@ class ChatsScreen(Screen):
         return encrypted
 
     def get_public_key(self, username):
-        db = firestore.client()
-        doc_ref = db.collection('users').document(username)
-        doc = doc_ref.get()
-
-        if doc.exists:
-            return doc.to_dict().get('public_key')
+        sql = "SELECT public_key FROM Users WHERE username = %s"
+        result = db.query(sql, (username,))
+        if result:
+            return result[0]['public_key']
         else:
             print(f'No public key found for user: {username}')
             return None
@@ -825,18 +799,14 @@ class PasswordScreen(Screen):
             password_hash = hashlib.sha256(password.encode()).hexdigest()
 
             try:
-                # Fetch user data from Firestore based on the username stored in user.json
                 with open('user.json', 'r') as f:
                     data = json.load(f)
                     username = data['username']
-                
-                db = firestore.client()
-                user_ref = db.collection('users').document(username)
-                user_data = user_ref.get()
 
-                if user_data.exists:
-                    data = user_data.to_dict()
-                    if data['password_hash'] == password_hash:
+                sql = "SELECT password_hash FROM Users WHERE username = %s"
+                result = db.query(sql, (username,))
+                if result:
+                    if result[0]['password_hash'] == password_hash:
                         App.get_running_app().current_user = username
                         self.message.text = 'Login successful.'
                         self.manager.current = 'home'

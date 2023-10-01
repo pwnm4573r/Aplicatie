@@ -1,8 +1,7 @@
 import os
 import json
 from kivy.clock import Clock
-import firebase_init
-import firebase_admin
+import db
 from kivy.app import App
 from screens import MyScreenManager  # import MyScreenManager
 
