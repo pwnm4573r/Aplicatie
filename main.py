@@ -27,7 +27,7 @@ class MyApp(App):
             with open('chat.json', 'w') as f:
                 json.dump({}, f)
         chats_screen = self.screen_manager.get_screen('chats')
-        Clock.schedule_interval(chats_screen.fetch_latest_messages, 5)
+        Clock.schedule_interval(chats_screen.fetch_latest_messages, 10)
 
     def private_key_exists(self):
         return os.path.exists('private_key.pem')

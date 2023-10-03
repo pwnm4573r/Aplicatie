@@ -181,11 +181,11 @@ class RegistrationScreen(Screen):
             try:
                 # Fetch user data from MySQL
                 sql = "SELECT password_hash, public_key FROM Users WHERE username = %s"
-                user_data = db.query(sql, (username,))
+                user_data = db.query(sql, (username))
 
                 if user_data:
                     data = user_data[0]
-                    if data['password_hash'] == password_hash:
+                    if data[0] == password_hash:
                             # 1. Generate a new key pair
                         key = rsa.generate_private_key(
                             public_exponent=65537,
@@ -503,7 +503,7 @@ class ChatsScreen(Screen):
         username = App.get_running_app().current_user  # Assuming there's a method/attribute with the current user's username
         
         try:
-            url = f'https://server-middleware-r4ajsmn3fa-ez.a.run.app/get_message/{username}'
+            url = f'https://middleware-server-r4ajsmn3fa-ez.a.run.app/get_message/{username}'
             response = requests.get(url)
             if response.status_code != 200:
                 print(f'Error fetching messages for {username}: {response.status_code}')
@@ -664,7 +664,7 @@ class ChatsScreen(Screen):
             json.dump(chats, f)
         
         # Store info in MySQL on chat exit
-        sql = "UPDATE Chats SET chats = %s WHERE username = %s"
+        sql = "UPDATE Chats SET chat_partner = %s WHERE username = %s"
         db.query(sql, (json.dumps(chat_list), App.get_running_app().current_user))
 
 
@@ -702,6 +702,7 @@ class ChatsScreen(Screen):
     def encrypt_message(self, message, public_key):
         # Load public key
         pem = public_key.encode('ascii')
+        print(pem)
         public_key = serialization.load_pem_public_key(pem)
 
         # Encrypt the message
@@ -720,7 +721,7 @@ class ChatsScreen(Screen):
         sql = "SELECT public_key FROM Users WHERE username = %s"
         result = db.query(sql, (username,))
         if result:
-            return result[0]['public_key']
+            return result[0][0]
         else:
             print(f'No public key found for user: {username}')
             return None
@@ -755,7 +756,7 @@ class ChatsScreen(Screen):
 
     def send_http_request(self, username, encrypted_message):
         # The URL of your middleware server
-        url = 'https://server-middleware-r4ajsmn3fa-ez.a.run.app/send_message'
+        url = 'https://middleware-server-r4ajsmn3fa-ez.a.run.app/send_message'
 
         # Get the current user's username
         sender_username = App.get_running_app().current_user
@@ -805,15 +806,18 @@ class PasswordScreen(Screen):
 
                 sql = "SELECT password_hash FROM Users WHERE username = %s"
                 result = db.query(sql, (username,))
+                print(result)
+                
+                # Check if result is not empty and has the expected structure
                 if result:
-                    if result[0]['password_hash'] == password_hash:
+                    if result[0][0] == password_hash:
                         App.get_running_app().current_user = username
                         self.message.text = 'Login successful.'
                         self.manager.current = 'home'
                     else:
                         self.message.text = 'Invalid password.'
                 else:
-                    self.message.text = 'User does not exist.'
+                    self.message.text = 'User does not exist or unexpected result structure.'
             except Exception as e:
                 self.message.text = str(e)
         else:
