@@ -706,7 +706,7 @@ class ChatsScreen(Screen):
         # Load public key
         pem = public_key.encode('ascii')
         print(pem)
-        public_key = serialization.load_pem_public_key(pem, backend=default_backend)
+        public_key = serialization.load_pem_public_key(pem, backend=default_backend())
 
         # Encrypt the message
         encrypted = public_key.encrypt(
