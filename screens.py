@@ -131,6 +131,7 @@ class RegistrationScreen(Screen):
             key = rsa.generate_private_key(
                 public_exponent=65537,
                 key_size=2048,
+                backend=default_backend()
             )
 
             # Serialize the public key
@@ -514,12 +515,14 @@ class ChatsScreen(Screen):
             # Skip if there are no new messages
             if messages:
                 for message_data in messages:
+
                     try:
                         print(f"Sample message structure for {username}: {message_data}")  # Log the message data
                         
                         # Extracting the sender and encrypted message
-                        sender = message_data.get('message', {}).get('sender', 'unknown')
-                        encrypted_message_hex = message_data.get('message', {}).get('message', None)
+                        sender = message_data[1]
+                        encrypted_message_hex = message_data[0]
+                        message_id = message_data[2]
 
                         if not encrypted_message_hex:
                             print(f"Message data is missing expected keys: {message_data}")
@@ -541,7 +544,7 @@ class ChatsScreen(Screen):
 
                         # Store the message to chat.json
                         self.store_to_chat_json(sender, decrypted_message.decode())
-                        self.delete_message_from_mysql(username, message_data['id'])
+                        self.delete_message_from_mysql(username, message_id)
 
                         # Update the UI with the new messages
                         self.update_chat_list()

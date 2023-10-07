@@ -27,7 +27,7 @@ class MyApp(App):
             with open('chat.json', 'w') as f:
                 json.dump({}, f)
         chats_screen = self.screen_manager.get_screen('chats')
-        Clock.schedule_interval(chats_screen.fetch_latest_messages, 10)
+        Clock.schedule_interval(chats_screen.fetch_latest_messages, 20)
 
     def private_key_exists(self):
         return os.path.exists('private_key.pem')
@@ -36,6 +36,7 @@ class MyApp(App):
         # Delete the chat.json file
         if os.path.isfile('chat.json'):
             os.remove('chat.json')
+        db.close()
 
 if __name__ == '__main__':
     #firebase_admin.initialize_app()
